@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  auth0Id     String   @unique
+  email       String   @unique
+  username    String?  @unique
+  displayName String?
+  avatar      String?
+  bio         String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  liteforms Liteform[]
+  reports   Report[]
+
+  @@index([auth0Id])
+  @@index([username])
+}
+
+// One uploaded agent bundle
+model Liteform {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Metadata (from liteform.json + user edits)
+  title       String
+  description String?
+  slug        String?  // URL-friendly title slug
+
+  // Bundle storage (S3 prefix where all files live)
+  bundlePrefix  String   // e.g. "liteforms/<userId>/<id>/"
+  manifestJson  String   // raw liteform.json content
+  soulContent   String   // raw SOUL.md content (for preview without S3 fetch)
+
+  // Included files
+  markdownFiles String   @default("[]") // JSON array of filenames e.g. ["SOUL.md","AGENTS.md"]
+  hasVrm        Boolean  @default(false)
+  vrmFilename   String?  // e.g. "character.vrm"
+  coverFilename String?  // e.g. "cover.png"
+
+  // S3 public URLs (cached)
+  coverUrl      String?
+  vrmUrl        String?
+
+  isPublic      Boolean  @default(true)
+  viewCount     Int      @default(0)
+  downloadCount Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tags    LiteformTag[]
+  reports Report[]
+
+  @@index([userId])
+  @@index([isPublic, createdAt])
+  @@index([hasVrm])
+}
+
+model Tag {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  liteforms LiteformTag[]
+
+  @@index([name])
+}
+
+model LiteformTag {
+  liteformId String
+  liteform   Liteform @relation(fields: [liteformId], references: [id], onDelete: Cascade)
+  tagId      String
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([liteformId, tagId])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  liteformId String
+  liteform   Liteform @relation(fields: [liteformId], references: [id], onDelete: Cascade)
+  reporterId String?
+  reporter   User?    @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  reason     String
+  reviewed   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([liteformId])
+  @@index([reviewed])
+}
