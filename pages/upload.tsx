@@ -96,14 +96,24 @@ export default function Upload({ dbUser }: UploadProps) {
     } catch { toast.error("Failed to generate metadata") } finally { setGenerating(false) }
   }
 
-  async function uploadBlobFile(filename: string, bytes: Uint8Array): Promise<string> {
-    const { upload } = await import("@vercel/blob/client")
-    const blob = new Blob([bytes.buffer as ArrayBuffer])
-    const result = await upload(filename, blob, {
-      access: "public",
-      handleUploadUrl: "/api/upload",
+  /** Upload a file directly to Supabase Storage via presigned POST. Returns the public URL. */
+  async function uploadFile(filename: string, bytes: Uint8Array, contentType: string): Promise<string> {
+    // Get a presigned POST from our server
+    const tokenRes = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, contentType }),
     })
-    return result.url
+    const { url, fields, publicUrl } = await tokenRes.json()
+    if (!url) return "" // prototype mode — no storage configured
+
+    // POST directly to storage (bytes never touch our server)
+    const form = new FormData()
+    Object.entries(fields as Record<string, string>).forEach(([k, v]) => form.append(k, v))
+    form.append("file", new Blob([bytes.buffer as ArrayBuffer], { type: contentType }))
+    const uploadRes = await fetch(url, { method: "POST", body: form })
+    if (!uploadRes.ok) throw new Error(`Storage upload failed: ${uploadRes.status}`)
+    return publicUrl
   }
 
   async function handlePublish(e: React.FormEvent) {
@@ -112,20 +122,20 @@ export default function Upload({ dbUser }: UploadProps) {
     setUploading(true)
     const t = toast.loading("Publishing…")
     try {
-      // Upload binary files to Vercel Blob (no-op in prototype — returns "")
       let vrmUrl: string | null = null
       let coverUrl: string | null = null
-      const blobEnabled = !!(window as any).__VERCEL_BLOB__ || process.env.NODE_ENV === "production"
 
       if (bundle.hasVrm && bundle.vrmFilename && bundle.rawFiles[bundle.vrmFilename]) {
         toast.loading("Uploading VRM…", { id: t })
-        try { vrmUrl = await uploadBlobFile(bundle.vrmFilename, bundle.rawFiles[bundle.vrmFilename]) }
-        catch { /* blob not configured — continue without VRM URL */ }
+        try { vrmUrl = await uploadFile(bundle.vrmFilename, bundle.rawFiles[bundle.vrmFilename], "application/octet-stream") }
+        catch { /* storage not configured — continue without VRM URL */ }
       }
       if (bundle.hasCover && bundle.coverFilename && bundle.rawFiles[bundle.coverFilename]) {
         toast.loading("Uploading cover…", { id: t })
-        try { coverUrl = await uploadBlobFile(bundle.coverFilename, bundle.rawFiles[bundle.coverFilename]) }
-        catch { /* blob not configured — continue without cover URL */ }
+        const ext = bundle.coverFilename.split(".").pop()?.toLowerCase() ?? "png"
+        const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : `image/${ext}`
+        try { coverUrl = await uploadFile(bundle.coverFilename, bundle.rawFiles[bundle.coverFilename], mime) }
+        catch { /* storage not configured — continue without cover URL */ }
       }
 
       toast.loading("Publishing…", { id: t })

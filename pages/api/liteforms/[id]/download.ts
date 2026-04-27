@@ -4,7 +4,7 @@ import { prisma } from "lib/prisma"
 import path from "path"
 import fs from "fs/promises"
 
-const IS_PROTOTYPE = !process.env.BLOB_READ_WRITE_TOKEN
+const IS_PROTOTYPE = !process.env.S3_BUCKET_NAME || process.env.S3_BUCKET_NAME === "placeholder"
 
 async function fetchFileBytes(url: string): Promise<Buffer | null> {
   if (!url) return null
